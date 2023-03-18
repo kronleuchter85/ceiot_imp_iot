@@ -1,0 +1,50 @@
+version: "3.3"
+   
+services:
+
+  node:
+    build:
+      context: ./node
+    image: impiot_node
+    container_name: impiot_node
+    user: "node"
+    environment:
+      - NODE_ENV=production
+    ports:
+      - 8080:8080
+    command: "node index.js"
+    
+  mongodb:
+      image: mongo:4.0.4
+      container_name: impiot_mongodb
+      ports:
+        - 27017:27017
+      environment:
+        - MONGO_INITDB_DATABASE=test
+      volumes:
+        - ./mongodb_data:/data/db
+
+  # postgres:
+  #   image: postgres
+  #   container_name: impiot_postgres
+  #   ports:
+  #     - 5432:5432
+  #   expose:
+  #     - "5432"
+  #   environment:
+  #     - POSTGRES_DB=gtrader
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #   volumes:
+  #     - ./postgresql_data:/var/lib/postgresql/data
+
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: impiot_pgadmin
+  #   ports:
+  #     - 63782:80
+  #   environment:
+  #     - PGADMIN_DEFAULT_PASSWORD=admin
+  #     - PGADMIN_DEFAULT_EMAIL=admin@pgadmin.com
+  #     - PGADMIN_LISTEN_PORT=80
+    
