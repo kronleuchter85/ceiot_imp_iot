@@ -2,7 +2,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <dht.h>
-
+#include <string.h>
+#include <stdio.h>
 #if defined(CONFIG_EXAMPLE_TYPE_DHT11)
 #define SENSOR_TYPE DHT_TYPE_DHT11
 #endif
@@ -13,9 +14,17 @@
 #define SENSOR_TYPE DHT_TYPE_SI7021
 #endif
 
+
+
+//static const char *TAG = "temp_collector";
+
 void dht_test(void *pvParameters)
 {
-    float temperature, humidity;
+ //   float temperature, humidity;
+    float temperature = 0;
+    float humidity = 0;
+ 
+
 
 #ifdef CONFIG_EXAMPLE_INTERNAL_PULLUP
     gpio_set_pull_mode(dht_gpio, GPIO_PULLUP_ONLY);
@@ -23,8 +32,12 @@ void dht_test(void *pvParameters)
 
     while (1)
     {
-        if (dht_read_float_data(SENSOR_TYPE, CONFIG_EXAMPLE_DATA_GPIO, &humidity, &temperature) == ESP_OK)
-            printf("Humidity: %.1f%% Temp: %.1fC\n", humidity, temperature);
+        if (dht_read_float_data(SENSOR_TYPE, 4, &humidity, &temperature) == ESP_OK){
+
+            printf("Humidity: %.1f Temp: %.1fC\n", humidity, temperature);
+            //printf("Humidity: %d%% Temp: %dC\n", humidity / 10, temperature / 10);
+            //ESP_LOGI(TAG,"Humidity: %d%% Temp: %dC\n", humidity / 10, temperature / 10);
+        }
         else
             printf("Could not read data from sensor\n");
 
