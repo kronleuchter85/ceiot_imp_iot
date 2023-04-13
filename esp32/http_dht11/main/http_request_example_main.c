@@ -8,6 +8,7 @@
 */
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
@@ -23,6 +24,7 @@
 #include "lwip/netdb.h"
 #include "lwip/dns.h"
 #include "dht.h"
+#include "esp_mac.h"
 
 #define ONE_WIRE_GPIO 4
 #define USER_AGENT   "esp-idf/1.0 esp32c3"
@@ -42,7 +44,8 @@ static const dht_sensor_type_t sensor_type = DHT_TYPE_DHT11;
 
 static const char *TAG = "temp_collector";
 
-static char *BODY = "id="DEVICE_ID"&t=%0.2f&h=%0.2f";
+
+static char *BODY = "id="DEVICE_ID"&t=%0.2f&h=%0.2f&timestamp=%s&key=%s";
 
 static char *REQUEST_POST = "POST "WEB_PATH" HTTP/1.0\r\n"
     "Host: "API_IP_PORT"\r\n"
@@ -51,6 +54,16 @@ static char *REQUEST_POST = "POST "WEB_PATH" HTTP/1.0\r\n"
     "Content-Length: %d\r\n"
     "\r\n"
     "%s";
+
+time_t seconds;
+     
+
+// void print_mac(const unsigned char *mac) {
+// 	printf("%02X:%02X:%02X:%02X:%02X:%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+// }
+
+   
+
 
 static void http_get_task(void *pvParameters)
 {
@@ -61,7 +74,7 @@ static void http_get_task(void *pvParameters)
     struct addrinfo *res;
     struct in_addr *addr;
     int s, r;
-    char body[64];
+    char body[100];
     char recv_buf[64];
 
     char send_buf[256];
@@ -69,12 +82,72 @@ static void http_get_task(void *pvParameters)
     int16_t temperature = 0;
     int16_t humidity = 0;
  
+    unsigned char mac_base[6] = {0};
+    esp_efuse_mac_get_default(mac_base);
+    esp_read_mac(mac_base, ESP_MAC_WIFI_STA);
+    unsigned char mac_local_base[6] = {0};
+    unsigned char mac_uni_base[6] = {0};
+    esp_derive_local_mac(mac_local_base, mac_uni_base);
+    // printf("Local Address: ");
+    // print_mac(mac_local_base); 
+    // printf("\nUni Address: ");
+    // print_mac(mac_uni_base);
+    // printf("MAC Address: ");
+    // print_mac(mac_base);
+
+    // char mac_address_str_1[22];
+    // sprintf(mac_address_str_1, "%02X:%02X:%02X:%02X:%02X:%02X"
+    //     , mac_local_base[0]
+    //     , mac_local_base[1]
+    //     , mac_local_base[2]
+    //     , mac_local_base[3]
+    //     , mac_local_base[4]
+    //     , mac_local_base[5] );
+  
+
+    // char mac_address_str_2[22];
+    // sprintf(mac_address_str_2, "%02X:%02X:%02X:%02X:%02X:%02X"
+    //     , mac_uni_base[0]
+    //     , mac_uni_base[1]
+    //     , mac_uni_base[2]
+    //     , mac_uni_base[3]
+    //     , mac_uni_base[4]
+    //     , mac_uni_base[5] );
+  
+
+    char mac_address_str_3[22];
+    sprintf(mac_address_str_3, "%02X:%02X:%02X:%02X:%02X:%02X"
+        , mac_base[0]
+        , mac_base[1]
+        , mac_base[2]
+        , mac_base[3]
+        , mac_base[4]
+        , mac_base[5] );
+  
+    
     while(1) {
+
+        time_t rawtime;
+        struct tm *info;
+        char buffer[16];
+        time( &rawtime );
+        info = localtime( &rawtime );
+        strftime(buffer,16,"%Y%m%d%H%M%S", info);
+     
+
         if (dht_read_data(sensor_type, dht_gpio, &humidity, &temperature) == ESP_OK) {
+            // ESP_LOGI(TAG,"MAC: %s\n", mac_address_str_1);
+            // ESP_LOGI(TAG,"MAC: %s\n", mac_address_str_2);
+            ESP_LOGI(TAG,"MAC: %s\n", mac_address_str_3);
+            // ESP_LOGI(TAG,"MAC: %s\n", print_mac(mac_uni_base));
+            // ESP_LOGI(TAG,"MAC: %s\n", print_mac(mac_base));
+            
             ESP_LOGI(TAG,"Humidity: %d%% Temp: %dC\n", humidity / 10, temperature / 10);
-            sprintf(body, BODY, (float) temperature/10  , (float) humidity/10);
+            
+            //sprintf(body, BODY, (float) temperature/10  , (float) humidity/10 );
+            sprintf(body, BODY, (float) temperature/10  , (float) humidity/10 , buffer , mac_address_str_3);
             sprintf(send_buf, REQUEST_POST, (int)strlen(body),body );
-	    ESP_LOGI(TAG,"sending: \n%s\n",send_buf);
+	        ESP_LOGI(TAG,"sending: \n%s\n",send_buf);
         } else {
             ESP_LOGE(TAG,"Could not read data from sensor\n");
         }
@@ -124,8 +197,9 @@ static void http_get_task(void *pvParameters)
         struct timeval receiving_timeout;
         receiving_timeout.tv_sec = 5;
         receiving_timeout.tv_usec = 0;
-        if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &receiving_timeout,
-                sizeof(receiving_timeout)) < 0) {
+
+        if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &receiving_timeout, sizeof(receiving_timeout)) < 0) {
+
             ESP_LOGE(TAG, "... failed to set socket receiving timeout");
             close(s);
             vTaskDelay(4000 / portTICK_PERIOD_MS);
