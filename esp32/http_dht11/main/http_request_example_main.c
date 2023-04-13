@@ -35,7 +35,6 @@
 #define DEVICE_ID     "ESP32"
 
 
-/* HTTP Constants that aren't configurable in menuconfig */
 #define WEB_PATH "/measurement"
 
 static const gpio_num_t dht_gpio = ONE_WIRE_GPIO;
@@ -45,9 +44,9 @@ static const dht_sensor_type_t sensor_type = DHT_TYPE_DHT11;
 static const char *TAG = "temp_collector";
 
 
-static char *BODY = "id="DEVICE_ID"&t=%0.2f&h=%0.2f&timestamp=%s&key=%s";
+static char *BODY_MEASUREMENT = "id="DEVICE_ID"&t=%0.2f&h=%0.2f&timestamp=%s&key=%s";
 
-static char *REQUEST_POST = "POST "WEB_PATH" HTTP/1.0\r\n"
+static char *REQUEST_POST_MEASUREMENT = "POST "WEB_PATH" HTTP/1.0\r\n"
     "Host: "API_IP_PORT"\r\n"
     "User-Agent: "USER_AGENT"\r\n"
     "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -55,18 +54,20 @@ static char *REQUEST_POST = "POST "WEB_PATH" HTTP/1.0\r\n"
     "\r\n"
     "%s";
 
-time_t seconds;
-     
 
-// void print_mac(const unsigned char *mac) {
-// 	printf("%02X:%02X:%02X:%02X:%02X:%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
-// }
+static char *BODY_DEVICE = "id="DEVICE_ID"&n=%s&k=%s";
+
+static char *REQUEST_POST_REGISTER_DEVICE = "POST /device HTTP/1.0\r\n"
+    "Host: "API_IP_PORT"\r\n"
+    "User-Agent: "USER_AGENT"\r\n"
+    "Content-Type: application/x-www-form-urlencoded\r\n"
+    "Content-Length: %d\r\n"
+    "\r\n"
+    "%s";
 
    
+void http_post(char * send_buf){
 
-
-static void http_get_task(void *pvParameters)
-{
     const struct addrinfo hints = {
         .ai_family = AF_INET,
         .ai_socktype = SOCK_STREAM,
@@ -74,150 +75,144 @@ static void http_get_task(void *pvParameters)
     struct addrinfo *res;
     struct in_addr *addr;
     int s, r;
-    char body[100];
+
     char recv_buf[64];
 
-    char send_buf[256];
+    int err = getaddrinfo(API_IP, API_PORT, &hints, &res);
 
-    int16_t temperature = 0;
-    int16_t humidity = 0;
- 
+    if(err != 0 || res == NULL) {
+        ESP_LOGE(TAG, "DNS lookup failed err=%d res=%p", err, res);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        return;
+    }
+
+    addr = &((struct sockaddr_in *)res->ai_addr)->sin_addr;
+    ESP_LOGI(TAG, "DNS lookup succeeded. IP=%s", inet_ntoa(*addr));
+
+    s = socket(res->ai_family, res->ai_socktype, 0);
+    if(s < 0) {
+        ESP_LOGE(TAG, "... Failed to allocate socket.");
+        freeaddrinfo(res);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        return;
+    }
+    ESP_LOGI(TAG, "... allocated socket");
+
+    if(connect(s, res->ai_addr, res->ai_addrlen) != 0) {
+        ESP_LOGE(TAG, "... socket connect failed errno=%d", errno);
+        close(s);
+        freeaddrinfo(res);
+        vTaskDelay(4000 / portTICK_PERIOD_MS);
+        return;
+    }
+
+    ESP_LOGI(TAG, "... connected");
+    freeaddrinfo(res);
+
+    if (write(s, send_buf, strlen(send_buf)) < 0) {
+        ESP_LOGE(TAG, "... socket send failed");
+        close(s);
+        vTaskDelay(4000 / portTICK_PERIOD_MS);
+        return;
+    }
+    ESP_LOGI(TAG, "... socket send success 1");
+
+    struct timeval receiving_timeout;
+    receiving_timeout.tv_sec = 5;
+    receiving_timeout.tv_usec = 0;
+
+    if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &receiving_timeout, sizeof(receiving_timeout)) < 0) {
+
+        ESP_LOGE(TAG, "... failed to set socket receiving timeout");
+        close(s);
+        vTaskDelay(4000 / portTICK_PERIOD_MS);
+        return;
+    }
+    ESP_LOGI(TAG, "... set socket receiving timeout success");
+
+    do {
+        bzero(recv_buf, sizeof(recv_buf));
+        r = read(s, recv_buf, sizeof(recv_buf)-1);
+        for(int i = 0; i < r; i++) {
+            putchar(recv_buf[i]);
+        }
+    } while(r > 0);
+
+    ESP_LOGI(TAG, "... done reading from socket. Last read return=%d errno=%d.", r, errno);
+
+    close(s);
+}
+
+void get_mac_address(char * mac_address){
+
     unsigned char mac_base[6] = {0};
     esp_efuse_mac_get_default(mac_base);
     esp_read_mac(mac_base, ESP_MAC_WIFI_STA);
     unsigned char mac_local_base[6] = {0};
     unsigned char mac_uni_base[6] = {0};
     esp_derive_local_mac(mac_local_base, mac_uni_base);
-    // printf("Local Address: ");
-    // print_mac(mac_local_base); 
-    // printf("\nUni Address: ");
-    // print_mac(mac_uni_base);
-    // printf("MAC Address: ");
-    // print_mac(mac_base);
 
-    // char mac_address_str_1[22];
-    // sprintf(mac_address_str_1, "%02X:%02X:%02X:%02X:%02X:%02X"
-    //     , mac_local_base[0]
-    //     , mac_local_base[1]
-    //     , mac_local_base[2]
-    //     , mac_local_base[3]
-    //     , mac_local_base[4]
-    //     , mac_local_base[5] );
-  
-
-    // char mac_address_str_2[22];
-    // sprintf(mac_address_str_2, "%02X:%02X:%02X:%02X:%02X:%02X"
-    //     , mac_uni_base[0]
-    //     , mac_uni_base[1]
-    //     , mac_uni_base[2]
-    //     , mac_uni_base[3]
-    //     , mac_uni_base[4]
-    //     , mac_uni_base[5] );
-  
-
-    char mac_address_str_3[22];
-    sprintf(mac_address_str_3, "%02X:%02X:%02X:%02X:%02X:%02X"
+    // char mac_address_str_3[22];
+    sprintf(mac_address, "%02X:%02X:%02X:%02X:%02X:%02X"
         , mac_base[0]
         , mac_base[1]
         , mac_base[2]
         , mac_base[3]
         , mac_base[4]
         , mac_base[5] );
-  
+}
+
+void get_timestamp(char * timestamp){
+    time_t rawtime;
+    struct tm *info;
+    time( &rawtime );
+    info = localtime( &rawtime );
+    strftime(timestamp,16,"%Y%m%d%H%M%S", info);
+}
+
+static void http_get_task(void *pvParameters) {
     
+    int16_t temperature = 0;
+    int16_t humidity = 0;
+
+    //
+    // determinando la mac address
+    //
+    char mac_address_str_3[22];
+    get_mac_address(mac_address_str_3);
+
+    char body[100];
+    char send_buf[256];
+
+    //
+    // registramos el dispositivo con la mac address
+    //
+    sprintf(body, BODY_DEVICE, DEVICE_ID , mac_address_str_3);
+    sprintf(send_buf, REQUEST_POST_REGISTER_DEVICE, (int)strlen(body),body );
+    http_post(send_buf);
+
     while(1) {
 
-        time_t rawtime;
-        struct tm *info;
+        //
+        // determinando el timestamp
+        //
         char buffer[16];
-        time( &rawtime );
-        info = localtime( &rawtime );
-        strftime(buffer,16,"%Y%m%d%H%M%S", info);
-     
+        get_timestamp(buffer);
 
         if (dht_read_data(sensor_type, dht_gpio, &humidity, &temperature) == ESP_OK) {
-            // ESP_LOGI(TAG,"MAC: %s\n", mac_address_str_1);
-            // ESP_LOGI(TAG,"MAC: %s\n", mac_address_str_2);
+         
             ESP_LOGI(TAG,"MAC: %s\n", mac_address_str_3);
-            // ESP_LOGI(TAG,"MAC: %s\n", print_mac(mac_uni_base));
-            // ESP_LOGI(TAG,"MAC: %s\n", print_mac(mac_base));
             
             ESP_LOGI(TAG,"Humidity: %d%% Temp: %dC\n", humidity / 10, temperature / 10);
             
-            //sprintf(body, BODY, (float) temperature/10  , (float) humidity/10 );
-            sprintf(body, BODY, (float) temperature/10  , (float) humidity/10 , buffer , mac_address_str_3);
-            sprintf(send_buf, REQUEST_POST, (int)strlen(body),body );
+            sprintf(body, BODY_MEASUREMENT, (float) temperature/10  , (float) humidity/10 , buffer , mac_address_str_3);
+            sprintf(send_buf, REQUEST_POST_MEASUREMENT, (int)strlen(body),body );
 	        ESP_LOGI(TAG,"sending: \n%s\n",send_buf);
         } else {
             ESP_LOGE(TAG,"Could not read data from sensor\n");
         }
 
-        int err = getaddrinfo(API_IP, API_PORT, &hints, &res);
-
-        if(err != 0 || res == NULL) {
-            ESP_LOGE(TAG, "DNS lookup failed err=%d res=%p", err, res);
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            continue;
-        }
-
-        /* Code to print the resolved IP.
-
-           Note: inet_ntoa is non-reentrant, look at ipaddr_ntoa_r for "real" code */
-        addr = &((struct sockaddr_in *)res->ai_addr)->sin_addr;
-        ESP_LOGI(TAG, "DNS lookup succeeded. IP=%s", inet_ntoa(*addr));
-
-        s = socket(res->ai_family, res->ai_socktype, 0);
-        if(s < 0) {
-            ESP_LOGE(TAG, "... Failed to allocate socket.");
-            freeaddrinfo(res);
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            continue;
-        }
-        ESP_LOGI(TAG, "... allocated socket");
-
-        if(connect(s, res->ai_addr, res->ai_addrlen) != 0) {
-            ESP_LOGE(TAG, "... socket connect failed errno=%d", errno);
-            close(s);
-            freeaddrinfo(res);
-            vTaskDelay(4000 / portTICK_PERIOD_MS);
-            continue;
-        }
-
-        ESP_LOGI(TAG, "... connected");
-        freeaddrinfo(res);
-
-        if (write(s, send_buf, strlen(send_buf)) < 0) {
-            ESP_LOGE(TAG, "... socket send failed");
-            close(s);
-            vTaskDelay(4000 / portTICK_PERIOD_MS);
-            continue;
-        }
-        ESP_LOGI(TAG, "... socket send success");
-
-        struct timeval receiving_timeout;
-        receiving_timeout.tv_sec = 5;
-        receiving_timeout.tv_usec = 0;
-
-        if (setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &receiving_timeout, sizeof(receiving_timeout)) < 0) {
-
-            ESP_LOGE(TAG, "... failed to set socket receiving timeout");
-            close(s);
-            vTaskDelay(4000 / portTICK_PERIOD_MS);
-            continue;
-        }
-        ESP_LOGI(TAG, "... set socket receiving timeout success");
-
-        /* Read HTTP response */
-        do {
-            bzero(recv_buf, sizeof(recv_buf));
-            r = read(s, recv_buf, sizeof(recv_buf)-1);
-            for(int i = 0; i < r; i++) {
-                putchar(recv_buf[i]);
-            }
-        } while(r > 0);
-
-        ESP_LOGI(TAG, "... done reading from socket. Last read return=%d errno=%d.", r, errno);
-        close(s);
+        http_post(send_buf);
 
         for(int countdown = 10; countdown >= 0; countdown--) {
             ESP_LOGI(TAG, "%d... ", countdown);
