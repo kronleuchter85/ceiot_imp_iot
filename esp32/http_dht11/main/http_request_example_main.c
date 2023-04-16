@@ -27,26 +27,23 @@
 #include "esp_mac.h"
 
 #define ONE_WIRE_GPIO 4
-#define USER_AGENT   "esp-idf/1.0 esp32c3"
+#define USER_AGENT     "esp-idf/1.0 esp32c3"
 #define API_IP        "192.168.0.3"
 #define API_PORT      "9090"
 #define API_IP_PORT   API_IP ":" API_PORT
-
 #define DEVICE_ID     "ESP32"
 
-
-#define WEB_PATH "/measurement"
-
 static const gpio_num_t dht_gpio = ONE_WIRE_GPIO;
-
 static const dht_sensor_type_t sensor_type = DHT_TYPE_DHT11;
-
 static const char *TAG = "temp_collector";
 
 
+//
+// path /measurement API service
+//
 static char *BODY_MEASUREMENT = "id="DEVICE_ID"&t=%0.2f&h=%0.2f&timestamp=%s&key=%s";
 
-static char *REQUEST_POST_MEASUREMENT = "POST "WEB_PATH" HTTP/1.0\r\n"
+static char *REQUEST_POST_MEASUREMENT = "POST /measurement HTTP/1.0\r\n"
     "Host: "API_IP_PORT"\r\n"
     "User-Agent: "USER_AGENT"\r\n"
     "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -55,6 +52,9 @@ static char *REQUEST_POST_MEASUREMENT = "POST "WEB_PATH" HTTP/1.0\r\n"
     "%s";
 
 
+//
+// path /device API service
+//
 static char *BODY_DEVICE = "id="DEVICE_ID"&n=%s&k=%s";
 
 static char *REQUEST_POST_REGISTER_DEVICE = "POST /device HTTP/1.0\r\n"
